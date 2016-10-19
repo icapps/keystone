@@ -39,7 +39,7 @@ var DEFAULT_OPTION_KEYS = [
  *
  * @api public
  */
-function Field (list, path, options) {
+function Field(list, path, options) {
 
 	// Set field properties and options
 	this.list = list;
@@ -51,7 +51,9 @@ function Field (list, path, options) {
 	this.label = options.label || utils.keyToLabel(this.path);
 	this.typeDescription = options.typeDescription || this.typeDescription || this.type;
 
-	this.list.automap(this);
+	if (!options._isNested) {
+		this.list.automap(this);
+	}
 
 	// Warn on required fields that aren't initial
 	if (this.options.required
@@ -62,8 +64,8 @@ function Field (list, path, options) {
 		&& this.path !== this.list.mappings.name
 	) {
 		console.error('\nError: Invalid Configuration\n\n'
-		+ 'Field (' + list.key + '.' + path + ') is required but not initial, and has no default or generated value.\n'
-		+ 'Please provide a default, remove the required setting, or set initial: false to override this error.\n');
+			+ 'Field (' + list.key + '.' + path + ') is required but not initial, and has no default or generated value.\n'
+			+ 'Please provide a default, remove the required setting, or set initial: false to override this error.\n');
 		process.exit(1);
 	}
 
@@ -78,10 +80,12 @@ function Field (list, path, options) {
 	}
 
 	// Add the field to the schema
-	this.addToSchema(this.list.schema);
+	this.addToSchema(options._isNested ? options._nestedSchema : this.list.schema);
 
 	// Add pre-save handler to the list if this field watches others
-	if (this.options.watch) {
+	if (options._isNested && this.options.watch) {
+		throw new Error('Nested fields do not support the `watch` option.');
+	} else if (this.options.watch) {
 		this.list.schema.pre('save', this.getPreSaveWatcher());
 	}
 
@@ -159,7 +163,9 @@ Field.prototype.getPreSaveWatcher = function () {
 
 	if (this.options.watch === true) {
 		// watch == true means always apply the value method
-		applyValue = function () { return true; };
+		applyValue = function () {
+			return true;
+		};
 	} else {
 		// if watch is a string, convert it to a list of paths to watch
 		if (typeof this.options.watch === 'string') {
@@ -188,13 +194,13 @@ Field.prototype.getPreSaveWatcher = function () {
 
 	if (!applyValue) {
 		console.error('\nError: Invalid Configuration\n\n'
-		+ 'Invalid watch value (' + this.options.watch + ') provided for ' + this.list.key + '.' + this.path + ' (' + this.type + ')');
+			+ 'Invalid watch value (' + this.options.watch + ') provided for ' + this.list.key + '.' + this.path + ' (' + this.type + ')');
 		process.exit(1);
 	}
 
 	if (typeof this.options.value !== 'function') {
 		console.error('\nError: Invalid Configuration\n\n'
-		+ 'Watch set with no value method provided for ' + this.list.key + '.' + this.path + ' (' + this.type + ')');
+			+ 'Watch set with no value method provided for ' + this.list.key + '.' + this.path + ' (' + this.type + ')');
 		process.exit(1);
 	}
 
@@ -205,7 +211,7 @@ Field.prototype.getPreSaveWatcher = function () {
 		di(field.options.value).call(this, function (err, val) {
 			if (err) {
 				console.error('\nError: '
-				+ 'Watch set with value method for ' + field.list.key + '.' + field.path + ' (' + field.type + ') throws error:' + err);
+					+ 'Watch set with value method for ' + field.list.key + '.' + field.path + ' (' + field.type + ') throws error:' + err);
 			} else {
 				this.set(field.path, val);
 			}
@@ -218,17 +224,39 @@ module.exports = Field;
 
 /** Getter properties for the Field prototype */
 definePrototypeGetters(Field, {
-	size: function () { return this.getSize(); },
-	initial: function () { return this.options.initial || false; },
-	required: function () { return this.options.required || false; },
-	note: function () { return this.options.note || ''; },
-	col: function () { return this.options.col || false; },
-	noedit: function () { return this.options.noedit || false; },
-	nocol: function () { return this.options.nocol || false; },
-	nosort: function () { return this.options.nosort || false; },
-	collapse: function () { return this.options.collapse || false; },
-	hidden: function () { return this.options.hidden || false; },
-	dependsOn: function () { return this.options.dependsOn || false; },
+	size: function () {
+		return this.getSize();
+	},
+	initial: function () {
+		return this.options.initial || false;
+	},
+	required: function () {
+		return this.options.required || false;
+	},
+	note: function () {
+		return this.options.note || '';
+	},
+	col: function () {
+		return this.options.col || false;
+	},
+	noedit: function () {
+		return this.options.noedit || false;
+	},
+	nocol: function () {
+		return this.options.nocol || false;
+	},
+	nosort: function () {
+		return this.options.nosort || false;
+	},
+	collapse: function () {
+		return this.options.collapse || false;
+	},
+	hidden: function () {
+		return this.options.hidden || false;
+	},
+	dependsOn: function () {
+		return this.options.dependsOn || false;
+	},
 });
 
 /**
@@ -236,7 +264,7 @@ definePrototypeGetters(Field, {
  * Overridden by some fieldType Classes
  */
 Field.prototype.addToSchema = function (schema) {
-	var ops = (this._nativeType) ? _.defaults({ type: this._nativeType }, this.options) : this.options;
+	var ops = (this._nativeType) ? _.defaults({type: this._nativeType}, this.options) : this.options;
 	schema.path(this.path, ops);
 	this.bindUnderscoreMethods();
 };
@@ -248,9 +276,9 @@ Field.prototype.addToSchema = function (schema) {
  */
 Field.prototype.bindUnderscoreMethods = function () {
 	var field = this;
-	(this._underscoreMethods || []).concat({ fn: 'updateItem', as: 'update' }).forEach(function (method) {
+	(this._underscoreMethods || []).concat({fn: 'updateItem', as: 'update'}).forEach(function (method) {
 		if (typeof method === 'string') {
-			method = { fn: method, as: method };
+			method = {fn: method, as: method};
 		}
 		if (typeof field[method.fn] !== 'function') {
 			throw new Error('Invalid underscore method (' + method.fn + ') applied to ' + field.list.key + '.' + field.path + ' (' + field.type + ')');
